@@ -80,7 +80,7 @@ class ApiController extends BaseController {
      */
     protected function error()
     {
-        return call_user_func([$this->error, 'handle'], func_get_args());
+        return call_user_func([$this->api, 'respondWithError'], func_get_args());
     }
 
     /**
