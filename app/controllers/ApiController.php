@@ -2,22 +2,23 @@
 
 /**
  * @author Mahmoud Zalt <inbox@mahmoudzalt.com>
+ * @author Abed Halawi <halawi.abed@gmail.com>
  */
 
+use Traversable;
 use Illuminate\Support\Collection;
+use Illuminate\Pagination\Paginator;
+use Lib\Api\Mappers\MapperInterface;
 
-class ApiController extends BaseController
-{
+class ApiController extends BaseController {
 
-    private $mapper_dir = 'app\Lib\Mappers\\';
+    private $mappers_base_namespace = 'Lib\Api\Mappers\\';
 
-    protected $api_responder;
-    protected $api_exception;
+    protected $api;
 
     public function __construct()
     {
-        $this->api_responder = App::make('app\Lib\ApiResponder');
-        $this->api_exception = App::make('app\Lib\Exceptions\ApiException');
+        $this->api = App::make('Lib\Api\Api');
     }
 
     /**
@@ -29,47 +30,69 @@ class ApiController extends BaseController
      * @param null $total
      * @param null $page
      * @param array $headers
-     * @param int $potions
+     * @param int $options
      *
      * @internal param $mapper
-     * @return mixed
+     * @return Illuminate\Http\JsonResponse
      */
-    protected function respond($model, $data, $status = 200, $total = null, $page = null, $headers = array(), $potions = 0)
+    protected function respond($mapper, $data)
     {
-        // create an instance of the mapper of the provided model (ex: Post ==> path/to/PostsMapper)
-        $mapper = App::make($this->mapper_dir . $model . 'sMapper');
+        // We will check whether we've been passed an actual mapper instance, otherwise we'll have to
+        // resolve the mapper class name into an actual mapper instance.
+        if ( ! is_object($mapper)) $mapper = $this->resolveMapperClassName($mapper);
 
-        // validate the mapper is an object and is of type MapperInterface
-        if ( ! is_object($mapper) or ! $mapper instanceof app\Lib\Mappers\MapperInterface )
-           dd('throw Exception...');
+        // All mappers must implement or extend the mapper interface.
+        if ( ! $mapper instanceof MapperInterface) dd('throw Exception...');
 
-        // if the data is a single objs (not a collection of objs) then convert it a collection of objs
-        if ( ! $data instanceof Illuminate\Support\Collection and ! is_array($data) )
-             $data = Collection::make([$data]);
+        // Check whether we should be iterating through data and mapping each item
+        // or we've been passed an instance so that we pass it on as is.
+        // We also have support for paginators so where we extract the required data as needed,
+        // which helps dev pass in a paginator instance without messing around with it.
+        // When we get a paginator we format the args of the ApiResponder as needed.
+        if ($data instanceof Paginator)
+        {
+            $data = $data->toArray();
+            $args = [$status, $data->getTotal(), $data->getCurrentPage()];
+        }
+        // Otherwise we take the arguments passed to this function and pass them as is.
+        else
+        {
+            $args = array_slice(func_get_args(), 2);
+        }
+        // In the case of a collection all we need is the data as a Traversable so that we
+        // iterate and map each iterm.
+        if ($data instanceof Collection) $data = $data->all();
+        // Leave traversing data till the end of the pipeline so that any transformation
+        // that happened so far must have transformed them into an array.
+        if ($data instanceof Traversable) $data = array_map([$mapper, 'map'], $data);
+        // In this case we got an object so we'll map it right away so that when we return it
+        // it ends up being an object not an array with one object.
+        else $data = $mapper->map($data);
 
-        // call the map function of this mapper for each model object in the $data array for mapping
-        foreach ($data as $obj)
-            $mapped_data[] = $mapper->map($obj);
-
-        return $this->respondOnly($mapped_data, $status, $total, $page, $headers, $potions);
+        // Finally, respond.
+        return call_user_func([$this->api, 'respond'], array_merge($data, $args));
     }
 
+    /**
+     * An error occurred, respond accordingly.
+     *
+     * @return Illuminate\Http\JsonResponse
+     */
+    protected function error()
+    {
+        return call_user_func([$this->error, 'handle'], func_get_args());
+    }
 
     /**
-     * @param $data
-     * @param int $status
-     * @param null $total
-     * @param null $page
-     * @param array $headers
-     * @param int $potions
+     * Resolve a class name of a mapper into the actual instance.
+     *
+     * @param  string $classname
      *
      * @return mixed
      */
-    protected function respondOnly($data, $status = 200, $total = null, $page = null, $headers = array(), $potions = 0)
+    protected function resolveMapperClassName($classname)
     {
-        return $this->api_responder->respond($data, $status, $total, $page, $headers, $potions);
+        return App::make($this->mappers_base_namespace . $classname);
     }
-
-
 
 }

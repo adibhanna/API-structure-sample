@@ -16,9 +16,7 @@ class PostsController extends ApiController {
 	 */
 	public function index()
 	{
-        $posts = Post::take(10)->get();
-
-        return $this->respond('Post', $posts);
+        return $this->respond('PostsMapper', Post::paginate(10));
 	}
 
 	/**
@@ -52,12 +50,16 @@ class PostsController extends ApiController {
 	 */
 	public function show($id)
 	{
-        if ( ! is_numeric($id))
-            return $this->api_exception->error(401);
+        try {
 
-        $post = Post::find($id);
+		    if ( ! is_numeric($id)) $id = intval($id);
 
-        return $this->respond('Post', $post);
+	        return $this->respond('Post', Post::find($id));
+
+        } catch (ModelNotFoundException $e) {
+
+        	return $this->error($e);
+        }
 	}
 
 	/**
